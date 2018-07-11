@@ -44,6 +44,19 @@
 #define STM32_SPI_SPI3_IRQ_PRIORITY         10
 #define STM32_SPI_DMA_ERROR_HOOK(spip)      osalSysHalt("DMA failure")
 
+/*
+ * SERIAL driver system settings.
+ */
+#define STM32_SERIAL_USE_USART1             FALSE
+#define STM32_SERIAL_USE_USART2             TRUE
+#define STM32_SERIAL_USE_USART3             FALSE
+#define STM32_SERIAL_USART1_PRIORITY        12
+#define STM32_SERIAL_USART2_PRIORITY        12
+#define STM32_SERIAL_USART3_PRIORITY        12
+
+/*
+ * CAN driver system settings.
+ */
 #define STM32_CAN_USE_CAN1                  TRUE
 #define STM32_CAN_CAN1_IRQ_PRIORITY         11
 

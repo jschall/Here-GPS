@@ -1,5 +1,7 @@
 CSRC = $(shell find src -name "*.c")
 INCDIR = ./include
+USE_OPT = -O3 -g
+USE_LTO = no
 
 MODULES_ENABLED = \
 chibios_sys_init \
@@ -14,6 +16,7 @@ can_driver_stm32 \
 can \
 can_autobaud \
 uavcan \
+uavcan_debug \
 uavcan_nodestatus_publisher \
 uavcan_getnodeinfo_server \
 uavcan_beginfirmwareupdate_server \
@@ -23,6 +26,31 @@ freemem_check \
 gps
 
 MESSAGES_ENABLED = \
-uavcan.protocol.debug.LogMessage
+uavcan.protocol.debug.LogMessage \
+uavcan.protocol.debug.KeyValue
+
+UBX_MESSAGES_ENABLED = \
+ACK-ACK \
+ACK-NAK \
+CFG-CFG \
+CFG-RATE \
+CFG-MSG1 \
+CFG-MSG \
+CFG-PRT \
+CFG-GNSS \
+CFG-SBAS \
+CFG-NAV5 \
+MON-HW \
+MON-HW2 \
+MON-VER \
+NAV-SOL \
+NAV-SVINFO \
+NAV-STATUS \
+NAV-POSLLH \
+NAV-VELNED \
+NAV-DOP \
+NAV-PVT \
+RXM-RAWX
+
 
 include framework/include.mk
