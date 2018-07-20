@@ -10,13 +10,20 @@
 #include <modules/pubsub/pubsub.h>
 #include <modules/worker_thread/worker_thread.h>
 #include <modules/uavcan_debug/uavcan_debug.h>
+#include <uavcan.equipment.gnss.Fix.h>
+#include <uavcan.equipment.gnss.Auxiliary.h>
 #include <ubx_msgs.h>
+#include <time.h>
 
 #define WT lpwork_thread
 WORKER_THREAD_DECLARE_EXTERN(WT)
 
 #define UBX_MSG_TOPIC_GROUP PUBSUB_DEFAULT_TOPIC_GROUP
 PUBSUB_TOPIC_GROUP_DECLARE_EXTERN(UBX_MSG_TOPIC_GROUP)
+
+
+//#define gps_debug(msg, fmt, args...) do {uavcan_send_debug_msg(LOG_LEVEL_DEBUG, msg, fmt,  __FUNCTION__, __LINE__, ## args); } while(0);
+#define gps_debug(msg, fmt, args...)
 
 #define GPS_CFG_BAUD 115200U
 static const uint32_t baudrates[] = {9600U, 115200U, 4800U, 19200U, 38400U, 57600U, 230400U};
@@ -51,6 +58,10 @@ struct ubx_gps_handle_s {
     uint32_t last_baud_change_ms;
     struct worker_thread_timer_task_s ubx_gps_init_task;
     uint8_t total_msg_cfgs;
+    struct {
+        struct uavcan_equipment_gnss_Fix_s fix;
+        struct uavcan_equipment_gnss_Auxiliary_s aux;
+    }state;
 } ubx_handle;
 
 struct ubx_msg_cfg_s {
@@ -100,13 +111,18 @@ static void ubx_cfg_msg_handler(size_t msg_size, const void* msg, void* ctx);
 //NAV-SVINFO
 static void ubx_nav_svinfo_handler(size_t msg_size, const void* msg, void* ctx);
 //NAV-POSLLH
-static void ubx_nav_posllh_handler(size_t msg_size, const void* msg, void* ctx);
+//static void ubx_nav_posllh_handler(size_t msg_size, const void* msg, void* ctx);
+//NAV-VELNED
+//static void ubx_nav_velned_handler(size_t msg_size, const void* msg, void* ctx);
+//NAV-PVT
+static void ubx_nav_pvt_handler(size_t msg_size, const void* msg, void* ctx);
+//NAV-STATUS
+//static void ubx_nav_status_handler(size_t msg_size, const void* msg, void* ctx);
 
-static void ubx_nav_svinfo_handler(size_t msg_size, const void* msg, void* ctx);
 
 struct ubx_msg_cfg_s ubx_cfg_list[] = { \
-    {UBX_NAV_SVINFO_CLASS_ID, UBX_NAV_SVINFO_MSG_ID, 2, {0}, {0}, ubx_nav_svinfo_handler}, \
-    {UBX_NAV_POSLLH_CLASS_ID, UBX_NAV_POSLLH_MSG_ID, 2, {0}, {0}, ubx_nav_posllh_handler} \
+    {UBX_NAV_SVINFO_CLASS_ID, UBX_NAV_SVINFO_MSG_ID, 4, {0}, {0}, ubx_nav_svinfo_handler}, \
+    {UBX_NAV_PVT_CLASS_ID, UBX_NAV_PVT_MSG_ID, 1, {0}, {0}, ubx_nav_pvt_handler}, \
 };
 
 
@@ -257,6 +273,7 @@ static void ubx_gps_configure_msgs()
         }
         case STEP_CFG_MSG: {
             if (ubx_handle.cfg_msg_index >= ubx_handle.total_msg_cfgs) {
+                ubx_handle.configured = true;
                 ubx_handle.cfg_step++;
                 break;
             }
@@ -286,12 +303,13 @@ static void ubx_nav_sol_handler(size_t msg_size, const void* msg, void* ctx)
 {
     (void)msg_size;
     (void)ctx;
+    //struct ubx_gps_handle_s* _handle = (struct ubx_gps_handle_s*)ctx;
     const struct gps_msg *parsed_msg = msg;
     struct ubx_nav_sol_periodicpolled_s *nav_sol = ubx_parse_ubx_nav_sol_periodicpolled(parsed_msg->frame_buffer, parsed_msg->msg_len);
     if (nav_sol != NULL) {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-SOL", "Time: %d Fix: %d SatUsed: %d posX: %ld posY: %ld posZ: %ld", nav_sol->iTOW, nav_sol->gpsFix, nav_sol->numSV, nav_sol->ecefX, nav_sol->ecefY, nav_sol->ecefZ);
+        gps_debug("NAV-SOL", "Time: %d Fix: %d SatUsed: %d posX: %ld posY: %ld posZ: %ld", nav_sol->iTOW, nav_sol->gpsFix, nav_sol->numSV, nav_sol->ecefX, nav_sol->ecefY, nav_sol->ecefZ);
     } else {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-SOL", "BAD MSG");
+        gps_debug("NAV-SOL", "BAD MSG");
     }
 }
 
@@ -304,27 +322,92 @@ static void ubx_nav_svinfo_handler(size_t msg_size, const void* msg, void* ctx)
     struct ubx_nav_svinfo_periodicpolled_s *nav_svinfo = ubx_parse_ubx_nav_svinfo_periodicpolled(parsed_msg->frame_buffer, parsed_msg->msg_len);
 
     if (nav_svinfo != NULL) {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-SVINFO", "Time: %d NumSats: %d", nav_svinfo->iTOW, nav_svinfo->numCh);
+        gps_debug("NAV-SVINFO", "Time: %d NumSats: %d", nav_svinfo->iTOW, nav_svinfo->numCh);
     } else {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-SVINFO", "BAD MSG");
+        gps_debug("NAV-SVINFO", "BAD MSG");
     }
 }
 
-//NAV-POSLLH
-static void ubx_nav_posllh_handler(size_t msg_size, const void* msg, void* ctx)
+//NAV-PVT
+static void ubx_nav_pvt_handler(size_t msg_size, const void* msg, void* ctx)
 {
     (void)msg_size;
-    (void)ctx;
+    struct ubx_gps_handle_s* _handle = (struct ubx_gps_handle_s*)ctx;
     const struct gps_msg *parsed_msg = msg;
-    struct ubx_nav_posllh_periodicpolled_s *nav_posllh = ubx_parse_ubx_nav_posllh_periodicpolled(parsed_msg->frame_buffer, parsed_msg->msg_len);
+    struct ubx_nav_pvt_periodicpolled_s *nav_pvt = ubx_parse_ubx_nav_pvt_periodicpolled(parsed_msg->frame_buffer, parsed_msg->msg_len);
 
-    if (nav_posllh != NULL) {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-POSLLH", "Time: %d lon: %d lat: %d height: %d", nav_posllh->iTOW, nav_posllh->lon, nav_posllh->lat, nav_posllh->height);
+    if (nav_pvt != NULL) {
+        gps_debug("NAV-PVT", "Time: %d lon: %d lat: %d height: %d", nav_pvt->iTOW, nav_pvt->lon, nav_pvt->lat, nav_pvt->height);
+        if (_handle->configured) {
+            //set state
+            //Position
+            _handle->state.fix.latitude_deg_1e8 = nav_pvt->lat*10;
+            _handle->state.fix.longitude_deg_1e8 = nav_pvt->lon*10;
+            _handle->state.fix.height_ellipsoid_mm = nav_pvt->height;
+            _handle->state.fix.height_msl_mm = nav_pvt->hMSL;
+            //Velocity
+            _handle->state.fix.ned_velocity[0] = nav_pvt->velN/1e3f;
+            _handle->state.fix.ned_velocity[1] = nav_pvt->velE/1e3f;
+            _handle->state.fix.ned_velocity[2] = nav_pvt->velD/1e3f;
+            //Heading of motion
+            //_handle->state.fix.heading_of_motion =
+            //uncertainties
+            //Position
+            uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-PVT" ,"%d %d", nav_pvt->hAcc, nav_pvt->vAcc);
+            _handle->state.fix.position_covariance_len = 9;
+            _handle->state.fix.position_covariance[0] = SQ(((float)(nav_pvt->hAcc)/1e3f));
+            _handle->state.fix.position_covariance[4] = SQ(((float)(nav_pvt->hAcc)/1e3f));
+            _handle->state.fix.position_covariance[8] = SQ(((float)(nav_pvt->vAcc)/1e3f));
+            //Velocity
+            _handle->state.fix.velocity_covariance_len = 9;
+            _handle->state.fix.velocity_covariance[0] = SQ(((float)(nav_pvt->sAcc)/1e3f));
+            _handle->state.fix.velocity_covariance[4] = _handle->state.fix.velocity_covariance[0];
+            _handle->state.fix.velocity_covariance[8] = _handle->state.fix.velocity_covariance[0];
+            //Fix Mode
+            switch(nav_pvt->fixType) {
+                case 2: //2D-fix
+                    _handle->state.fix.status = UAVCAN_EQUIPMENT_GNSS_FIX_STATUS_2D_FIX;
+                    break;
+                case 3: //3D-Fix
+                case 4: //GNSS + dead reckoning combined
+                    _handle->state.fix.status = UAVCAN_EQUIPMENT_GNSS_FIX_STATUS_3D_FIX;
+                    break;
+                case 5: //time only fix
+                    _handle->state.fix.status = UAVCAN_EQUIPMENT_GNSS_FIX_STATUS_TIME_ONLY;
+                    break;
+                case 0: //no fix
+                case 1: //dead reckoning only
+                default:
+                    _handle->state.fix.status = UAVCAN_EQUIPMENT_GNSS_FIX_STATUS_NO_FIX;
+                    break;
+            }
+            //Misc
+            _handle->state.fix.sats_used = nav_pvt->numSV;
+            _handle->state.fix.pdop = nav_pvt->pDOP*0.01f;
+            //Time
+            if ((nav_pvt->flags & 0x01) && (nav_pvt->flags & 0x02)) { //Check if utc date and time valid
+                //create time
+                struct tm std_tm;
+                std_tm.tm_year = (nav_pvt->year - 1900);
+                std_tm.tm_mon = (nav_pvt->month - 1);
+                std_tm.tm_mday = nav_pvt->day;
+                std_tm.tm_hour = nav_pvt->hour;
+                std_tm.tm_min = nav_pvt->min;
+                std_tm.tm_sec = nav_pvt->sec;
+                std_tm.tm_isdst = 0;
+                _handle->state.fix.gnss_timestamp.usec = (nav_pvt->nano/1000 + (((int64_t)mktime(&std_tm))*1000000LL));
+            } else {
+                _handle->state.fix.gnss_timestamp.usec = 0;
+                _handle->state.fix.status = UAVCAN_EQUIPMENT_GNSS_FIX_STATUS_NO_FIX;
+            }
+            _handle->state.fix.gnss_time_standard = UAVCAN_EQUIPMENT_GNSS_FIX_GNSS_TIME_STANDARD_UTC;
+            //Publish Fix Packet over CAN
+            uavcan_broadcast(0, &uavcan_equipment_gnss_Fix_descriptor, CANARD_TRANSFER_PRIORITY_HIGH, &_handle->state.fix);
+        }
     } else {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "NAV-POSLLH", "BAD MSG");
+        gps_debug("NAV-POSLLH", "BAD MSG");
     }
 }
-
 
 //ACK-ACK
 static void ubx_ack_ack_handler(size_t msg_size, const void* msg, void* ctx)
@@ -334,9 +417,9 @@ static void ubx_ack_ack_handler(size_t msg_size, const void* msg, void* ctx)
     const struct gps_msg *parsed_msg = msg;
     struct ubx_ack_ack_output_s *ack_ack = ubx_parse_ubx_ack_ack_output(parsed_msg->frame_buffer, parsed_msg->msg_len);
     if (ack_ack != NULL) {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "ACK-ACK", "CFG Ack %d %d", _handle->cfg_step, _handle->cfg_msg_index);
+        gps_debug("ACK-ACK", "CFG Ack %d %d", _handle->cfg_step, _handle->cfg_msg_index);
     } else {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "ACK-ACK", "BAD MSG");
+        gps_debug("ACK-ACK", "BAD MSG");
     }
 }
 
@@ -352,18 +435,18 @@ static void ubx_cfg_msg_handler(size_t msg_size, const void* msg, void* ctx)
             if (cfg_msg->msgClass == ubx_cfg_list[_handle->cfg_msg_index].class_id && 
                 cfg_msg->msgID == ubx_cfg_list[_handle->cfg_msg_index].msg_id &&
                 cfg_msg->rate[UBX_PORT_ID] == ubx_cfg_list[_handle->cfg_msg_index].rate) {
-                uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-MSG", "MSG CFG (%d/%d) for 0x%x 0x%x set", _handle->cfg_msg_index + 1, _handle->total_msg_cfgs, ubx_cfg_list[_handle->cfg_msg_index].class_id, ubx_cfg_list[_handle->cfg_msg_index].msg_id, _handle->total_msg_cfgs);
+                gps_debug("CFG-MSG", "MSG CFG (%d/%d) for 0x%x 0x%x set", _handle->cfg_msg_index + 1, _handle->total_msg_cfgs, ubx_cfg_list[_handle->cfg_msg_index].class_id, ubx_cfg_list[_handle->cfg_msg_index].msg_id, _handle->total_msg_cfgs);
                 _handle->cfg_msg_index++;
                 _handle->do_cfg = false;
             } else {
                 _handle->do_cfg = true;
-                uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-MSG", "MSG CFG for 0x%x 0x%x Not set Received 0x%x 0x%x %d", ubx_cfg_list[_handle->cfg_msg_index].class_id, ubx_cfg_list[_handle->cfg_msg_index].msg_id, cfg_msg->msgClass, cfg_msg->msgID, cfg_msg->rate[UBX_PORT_ID]);
+                gps_debug("CFG-MSG", "MSG CFG for 0x%x 0x%x Not set Received 0x%x 0x%x %d", ubx_cfg_list[_handle->cfg_msg_index].class_id, ubx_cfg_list[_handle->cfg_msg_index].msg_id, cfg_msg->msgClass, cfg_msg->msgID, cfg_msg->rate[UBX_PORT_ID]);
             }
         } else {
-            uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-MSG", "WRONG CFG");
+            gps_debug("CFG-MSG", "WRONG CFG");
         }
     } else {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-MSG", "BAD MSG");
+        gps_debug("CFG-MSG", "BAD MSG");
     }
 }
 
@@ -378,12 +461,12 @@ static void ubx_cfg_rate_handler(size_t msg_size, const void* msg, void* ctx)
         if (cfg_rate->measRate == 200 && cfg_rate->navRate == 1 && cfg_rate->timeRef == 0) {
             _handle->cfg_step++;
             _handle->do_cfg = false;
-            uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-RATE", "CFG Rate Set");
+            gps_debug("CFG-RATE", "CFG Rate Set");
         } else {
-            uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-RATE", "CFG Rate Not Set %d %d %d", cfg_rate->measRate, cfg_rate->navRate, cfg_rate->timeRef);
+            gps_debug("CFG-RATE", "CFG Rate Not Set %d %d %d", cfg_rate->measRate, cfg_rate->navRate, cfg_rate->timeRef);
             _handle->do_cfg = true;
         }
     } else {
-        uavcan_send_debug_msg(LOG_LEVEL_DEBUG, "CFG-RATE", "BAD MSG");
+        gps_debug("CFG-RATE", "BAD MSG");
     }
 }

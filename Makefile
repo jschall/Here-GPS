@@ -28,7 +28,9 @@ gps
 
 MESSAGES_ENABLED = \
 uavcan.protocol.debug.LogMessage \
-uavcan.protocol.debug.KeyValue
+uavcan.protocol.debug.KeyValue \
+uavcan.equipment.gnss.Fix \
+uavcan.equipment.gnss.Auxiliary
 
 UBX_MESSAGES_ENABLED = \
 ACK-ACK \
