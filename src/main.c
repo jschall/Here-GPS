@@ -341,8 +341,8 @@ static void ubx_nav_pvt_handler(size_t msg_size, const void* msg, void* ctx)
         if (_handle->configured) {
             //set state
             //Position
-            _handle->state.fix.latitude_deg_1e8 = nav_pvt->lat*10;
-            _handle->state.fix.longitude_deg_1e8 = nav_pvt->lon*10;
+            _handle->state.fix.latitude_deg_1e8 = (int64_t)nav_pvt->lat*10;
+            _handle->state.fix.longitude_deg_1e8 = (int64_t)nav_pvt->lon*10;
             _handle->state.fix.height_ellipsoid_mm = nav_pvt->height;
             _handle->state.fix.height_msl_mm = nav_pvt->hMSL;
             //Velocity
