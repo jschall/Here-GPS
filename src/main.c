@@ -385,7 +385,7 @@ static void ubx_nav_pvt_handler(size_t msg_size, const void* msg, void* ctx)
             _handle->state.fix.sats_used = nav_pvt->numSV;
             _handle->state.fix.pdop = nav_pvt->pDOP*0.01f;
             //Time
-            if ((nav_pvt->flags & 0x01) && (nav_pvt->flags & 0x02)) { //Check if utc date and time valid
+            if ((nav_pvt->valid & 0x01) && (nav_pvt->valid & 0x02)) { //Check if utc date and time valid
                 //create time
                 struct tm std_tm;
                 std_tm.tm_year = (nav_pvt->year - 1900);
